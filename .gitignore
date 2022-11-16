@@ -1,0 +1,12 @@
+node_modules
+build/contracts
+console.txt
+secrets.json
+contracts/backup
+.DS_Store
+scripts/tx.js
+
+#Hardhat files
+cache
+artifacts
+
