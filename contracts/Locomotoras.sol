@@ -41,7 +41,6 @@ contract Locomotoras is ERC721, Ownable, SignedAllowance, OperatorFilterer {
 
     uint256 public constant MAX_ITEMS = 2345;
 
-    IPrevCol private cDAOContract;
     IPrevCol private blankTokenContract;
 
     string public baseURI;
@@ -55,7 +54,6 @@ contract Locomotoras is ERC721, Ownable, SignedAllowance, OperatorFilterer {
 
     mapping (address => address) public replacedWallets;
 
-    mapping (uint256 => bool) public cDAOClaimed;
     mapping (uint256 => uint256) public blankTokenClaimed;
     
     /*///////////////////////////////////////////////////////////////
@@ -76,9 +74,15 @@ contract Locomotoras is ERC721, Ownable, SignedAllowance, OperatorFilterer {
     function mint(address to, uint256 nonce, bytes memory signature) public payable {
         require (saleState, "Presale not active");
     
-        require (msg.value >= regularPrice, "Not Enough Eth");
+        //price is stored in the right-most 128 bits of the nonce
+        uint256 price = (nonce << 128) >> 128;
+
+        //qty is stored in the middle 64 bytes
+        uint256 qty = ((nonce >> 128) << 192) >>192;
+
+        require (msg.value >= price * qty, "mint(): Not Enough Eth");
  
-        require(totalSupply() + 1 <= MAX_ITEMS, ">MaxSupply");
+        require(totalSupply() + qty <= MAX_ITEMS, ">MaxSupply");
         
         // this will throw if the allowance has already been used or is not valid
         _useAllowance(to, nonce, signature);
@@ -86,34 +90,9 @@ contract Locomotoras is ERC721, Ownable, SignedAllowance, OperatorFilterer {
         // If you try to re-enter here thru onERC721Received, function will revert
         // as your allowance is marked as used
         // Counter won't increment and your token will be overminted by the next minter.
-        _safeMint(to, _tokenIds.current()); 
-        _tokenIds.increment();        
-    }
-
-    // CDAO holders' mints
-    function cDAOHoldersMint (uint256[] calldata ownedTokens) external payable {
-        require (saleState, "Presale not active");
-        require (msg.value >= cDAOPrice * ownedTokens.length, "Not enough eth sent");
-        
-        address tokenOwner = checkReplacement(msg.sender);
-        uint256 etherLeft = msg.value;
-
-        for (uint256 i=0; i<ownedTokens.length; i++) {
-            uint256 curTokenId = ownedTokens[i];
-            if (cDAOContract.ownerOf(curTokenId) == tokenOwner && !cDAOClaimed[curTokenId]) {
-                etherLeft -= cDAOPrice; // can't go below zero because of a require above; in any case, no underflows with solidity 8.
-                cDAOClaimed[curTokenId] = true;
-                require(totalSupply() + 1 <= MAX_ITEMS, ">MaxSupply");
-                _safeMint(msg.sender, _tokenIds.current()); 
-                _tokenIds.increment();
-            }
-        }
-        // return change if it has left
-        if (etherLeft >= 0) {
-            // since etherLeft is a local variable, there is no need to clear it,
-            // even if someone decides to re-enter, etherLeft will be overwritten by the new msg.value
-            // in fact there's no reason to re-enter here as you have to pay every time you call this method
-            returnChange(etherLeft);
+        for (uint256 i=0; i<qty; i++) {
+            _safeMint(to, _tokenIds.current()); 
+            _tokenIds.increment();        
         }
     }
 
@@ -313,10 +292,6 @@ contract Locomotoras is ERC721, Ownable, SignedAllowance, OperatorFilterer {
         publicSaleState = !publicSaleState;
     }
 
-    function setCDAOContract(address _cDAOAddress) public onlyOwner {
-        cDAOContract = IPrevCol(_cDAOAddress);
-    }
-
     function setBlankContract(address _blankTokenAddress) public onlyOwner {
         blankTokenContract = IPrevCol(_blankTokenAddress);
     }
@@ -335,23 +310,6 @@ contract Locomotoras is ERC721, Ownable, SignedAllowance, OperatorFilterer {
         (bool success, ) = beneficiary.call{value: amt}("");
         if (!success) revert ("Withdrawal failed");
     } 
-
-    // Canvas DAO contract doesn't have tokensOfOwner Function, so we had to implement it here
-    function tokensOfOwnerCDAO(address minter) external view returns(uint256[] memory) {
-        //uint256 tokenCount = _balanceOf[tokenOwner];
-            uint256[] memory result;
-            uint256 resultIndex = 0;
-            uint256 NFTId;
-            address tokenOwner = checkReplacement(minter);
-
-            for (NFTId = 0; NFTId < 400; NFTId++) {   
-                if (cDAOContract.ownerOf(NFTId) == tokenOwner) {
-                    result[resultIndex] == (NFTId);
-                    resultIndex++;
-                } 
-            }     
-            return result;
-    }   
 }
 
 //   That's all, folks!

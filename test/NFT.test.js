@@ -30,25 +30,27 @@ describe('Minting tests', () => {
   const provider = ethers.provider;
   const { hexlify, toUtf8Bytes } = ethers.utils;
 
-async function signAllowance(account, mintQty, allowanceId, signerAccount = allowancesigner) {
-  const idBN = toBN(allowanceId).shl(128);
-  const nonce = idBN.add(mintQty);
-  const message = await nftContract.createMessage(account, nonce);
-
-  //const formattedMessage = hexlify(toUtf8Bytes(message));
-  const formattedMessage = hexlify(message);
-  const addr = signerAccount.address.toLowerCase();
-
-  /*
-  const signature = await signerAccount.signMessage(
-      ethers.utils.arrayify(message),
-  );
-  */
-
-  const signature = await provider.send('eth_sign', [addr, formattedMessage]);
-
-  return { nonce, signature };
-}
+  async function signAllowance(account, mintQty, allowanceId, price, signerAccount = allowancesigner) {
+    const idBN = toBN(allowanceId).shl(64);
+    const idAndQty = idBN.add(mintQty);
+    const idAndQtyShifted = idAndQty.shl(128);
+    const nonce = idAndQtyShifted.add(price);
+    const message = await nftContract.createMessage(account, nonce);
+  
+    //const formattedMessage = hexlify(toUtf8Bytes(message));
+    const formattedMessage = hexlify(message);
+    const addr = signerAccount.address.toLowerCase();
+  
+    /*
+    const signature = await signerAccount.signMessage(
+        ethers.utils.arrayify(message),
+    );
+    */
+  
+    const signature = await provider.send('eth_sign', [addr, formattedMessage]);
+  
+    return { nonce, signature };
+  }
 
   beforeEach(async () => {
       [deployer, random, random2, unlocker, holder, holder2, holder3, spender, allowancesigner, operator] = await ethers.getSigners();
@@ -92,7 +94,8 @@ async function signAllowance(account, mintQty, allowanceId, signerAccount = allo
       const { nonce: nonce, signature: allowance } = await signAllowance(
           await random.getAddress(),
           mintQty,
-          Math.floor(Math.random() * 1000 * (await provider.getBlockNumber())) //some random allowance id
+          Math.floor(Math.random() * 1000 * (await provider.getBlockNumber())), //some random allowance id
+          regularPrice
       );
 
       await nftContract.connect(random).mint(await random.getAddress(), nonce, allowance, {value: regularPrice});
@@ -114,17 +117,33 @@ async function signAllowance(account, mintQty, allowanceId, signerAccount = allo
     * ====== ====== ====== ====== ======  ====== */
 
   describe('Presale minting', async function () {
-    it('can mint token with a signature', async function () {
 
+    it('can mint token with a signature', async function () {
       const mintQty = 1;
       const { nonce: nonce, signature: allowance } = await signAllowance(
           await random.getAddress(),
           mintQty,
-          Math.floor(Math.random() * 1000 * (await provider.getBlockNumber())) //some random allowance id
+          Math.floor(Math.random() * 1000 * (await provider.getBlockNumber())), //some random allowance id
+          regularPrice
       );
       
-      price = 
       await nftContract.connect(random).mint(await random.getAddress(), nonce, allowance, {value: regularPrice});
+
+      expect(
+          await nftContract.balanceOf(await random.getAddress()),
+      ).to.be.equal(mintQty);
+  });
+
+  it('can mint token with cdao price', async function () {
+      const mintQty = 5;
+      const { nonce: nonce, signature: allowance } = await signAllowance(
+          await random.getAddress(),
+          mintQty,
+          Math.floor(Math.random() * 1000 * (await provider.getBlockNumber())), //some random allowance id
+          cDAOPrice
+      );
+      
+      await nftContract.connect(random).mint(await random.getAddress(), nonce, allowance, {value: cDAOPrice.mul(mintQty)});
 
       expect(
           await nftContract.balanceOf(await random.getAddress()),
@@ -137,7 +156,8 @@ async function signAllowance(account, mintQty, allowanceId, signerAccount = allo
       const { nonce: nonce, signature: allowance } = await signAllowance(
           await random.getAddress(),
           mintQty,
-          Math.floor(Math.random() * 1000 * (await provider.getBlockNumber())) //some random allowance id
+          Math.floor(Math.random() * 1000 * (await provider.getBlockNumber())), //some random allowance id
+          regularPrice
       );
         
       await nftContract.connect(random2).mint(await random.getAddress(), nonce, allowance, {value: regularPrice});
@@ -157,7 +177,8 @@ async function signAllowance(account, mintQty, allowanceId, signerAccount = allo
       const { nonce: nonce, signature: allowance } = await signAllowance(
           await random.getAddress(),
           mintQty,
-          Math.floor(Math.random() * 1000) //some random allowance id
+          Math.floor(Math.random() * 1000), //some random allowance id
+          regularPrice
       );
 
       await nftContract.connect(random).mint(await random.getAddress(), nonce, allowance, {value: regularPrice});
@@ -168,6 +189,21 @@ async function signAllowance(account, mintQty, allowanceId, signerAccount = allo
     ).to.be.equal(mintQty*quotas);
   });
 
+  it('cannot mint with lower eth sent', async function () {
+
+    const mintQty = 3;
+    const allowId = Math.floor(Math.random() * 1000 * (await provider.getBlockNumber()));
+    const { nonce: nonce, signature: allowance } = await signAllowance(
+          await random.getAddress(),
+          mintQty,
+          allowId, //some random allowance id
+          cDAOPrice
+    );
+
+    await expect(
+      nftContract.connect(random).mint(await random.getAddress(), nonce, allowance, {value: cDAOPrice.mul(mintQty-1)}),
+    ).to.be.revertedWith('mint(): Not Enough Eth');
+  });
 
   it('cannot reuse signature', async function () {
 
@@ -176,7 +212,8 @@ async function signAllowance(account, mintQty, allowanceId, signerAccount = allo
     const { nonce: nonce, signature: allowance } = await signAllowance(
           await random.getAddress(),
           mintQty,
-          allowId //some random allowance id
+          allowId, //some random allowance id
+          regularPrice
     );
     await nftContract.connect(random).mint(await random.getAddress(), nonce, allowance, {value: regularPrice});
     //console.log("cannot reuse sig: 1st mint ok");
@@ -193,7 +230,8 @@ async function signAllowance(account, mintQty, allowanceId, signerAccount = allo
       const { nonce: nonce, signature: allowance } = await signAllowance(
           await random.getAddress(),
           mintQty,
-          allowId //some random allowance id
+          allowId, //some random allowance id
+          regularPrice
       );
 
     await expect(
@@ -208,6 +246,7 @@ async function signAllowance(account, mintQty, allowanceId, signerAccount = allo
           await random.getAddress(),
           mintQty,
           Math.floor(Math.random() * 1000), 
+          regularPrice,
           random2
       );
 
@@ -223,6 +262,7 @@ async function signAllowance(account, mintQty, allowanceId, signerAccount = allo
           await random.getAddress(),
           mintQty,
           Math.floor(Math.random() * 1000), 
+          regularPrice
       );
       
       await nftContract.connect(deployer).setAllowancesSigner(random.address);
@@ -237,21 +277,24 @@ async function signAllowance(account, mintQty, allowanceId, signerAccount = allo
     ).to.be.revertedWith('Ownable: caller is not the owner');
   });
 
-  it('cannot mint with increased nonce', async function () {
+  
+  it('cannot mint with decreased price', async function () {
 
     const mintQty = 1;
       const { nonce: nonce, signature: allowance } = await signAllowance(
           await random.getAddress(),
           mintQty,
           Math.floor(Math.random() * 1000), 
+          regularPrice
       );
 
-      const nonce2 = nonce.add(2);
+      const nonce2 = nonce.sub(regularPrice).add(100);
 
     await expect(
-      nftContract.connect(random).mint(await random.getAddress(), nonce2, allowance, {value: regularPrice}),
+      nftContract.connect(random).mint(await random.getAddress(), nonce2, allowance, {value: 100}),
     ).to.be.revertedWith('!INVALID_SIGNATURE!');
   });
+  
 
   it('cannot manipulate signature', async function () {
 
@@ -260,13 +303,16 @@ async function signAllowance(account, mintQty, allowanceId, signerAccount = allo
           await random.getAddress(),
           mintQty,
           345, //some random id
+          regularPrice
       );
 
-      allowance =
+      //trying to mess with signature somehow
+      allowance = 
             '0x45eacf01' + allowance.substr(-(allowance.length - 10));
+      //console.log("Changed allowance: ", allowance);
 
     await expect(
-      nftContract.connect(random).mint(await random.getAddress(), nonce, allowance, {value: regularPrice}),
+      nftContract.connect(random).mint(await random.getAddress(), nonce, allowance, {value: 100}),
     ).to.be.reverted;
   }); 
 
@@ -280,7 +326,8 @@ async function signAllowance(account, mintQty, allowanceId, signerAccount = allo
       const { nonce: nonce, signature: allowance } = await signAllowance(
           await random.getAddress(),
           mintQty,
-          Math.floor(Math.random() * 1000 * (await provider.getBlockNumber())) //some random allowance id
+          Math.floor(Math.random() * 1000 * (await provider.getBlockNumber())), //some random allowance id
+          regularPrice
       );
 
     await expect (
@@ -288,7 +335,7 @@ async function signAllowance(account, mintQty, allowanceId, signerAccount = allo
     ).to.be.revertedWith('Presale not active');          
   });
 
-  // commented out, passes.
+  // commented out for speed, passes.
 /*
   it('can not order Over Capacity', async function () {
   
@@ -304,7 +351,8 @@ async function signAllowance(account, mintQty, allowanceId, signerAccount = allo
       const { nonce: nonce, signature: allowance } = await signAllowance(
           await random.getAddress(),
           mintQty,
-          Math.floor(Math.random() * 10000 * (await provider.getBlockNumber())) //some random allowance id
+          Math.floor(Math.random() * 10000 * (await provider.getBlockNumber())), //some random allowance id
+          regularPrice
       );
 
       await nftContract.connect(random).mint(await random.getAddress(), nonce, allowance, {value: regularPrice});
@@ -318,7 +366,8 @@ async function signAllowance(account, mintQty, allowanceId, signerAccount = allo
     const { nonce: nonce, signature: allowance } = await signAllowance(
       await random.getAddress(),
       mintQty,
-      Math.floor(Math.random() * 1000 * (await provider.getBlockNumber())) //some random allowance id
+      Math.floor(Math.random() * 1000 * (await provider.getBlockNumber())), //some random allowance id
+      regularPrice
     );
 
     await expect (
@@ -327,8 +376,7 @@ async function signAllowance(account, mintQty, allowanceId, signerAccount = allo
 
     ).to.be.revertedWith('>MaxSupply');          
   });
-*/
-  
+  */
 
 });
 
@@ -434,7 +482,8 @@ describe('Admin functions tests', async function () {
     const { nonce: nonce, signature: allowance } = await signAllowance(
           await random.getAddress(),
           mintQty,
-          Math.floor(Math.random() * 1000 * (await provider.getBlockNumber())) //some random allowance id
+          Math.floor(Math.random() * 1000 * (await provider.getBlockNumber())), //some random allowance id
+          regularPrice
     );
       
     price = 
