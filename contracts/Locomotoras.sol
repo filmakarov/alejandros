@@ -70,7 +70,7 @@ contract Locomotoras is ERC721, Ownable, SignedAllowance, OperatorFilterer {
                         MINTING LOGIC
     //////////////////////////////////////////////////////////////*/
 
-    // only 1 per user, can't be users in allowlist with more than 1 spot
+    // allowlist mint and cdao mint thru snapshot
     function mint(address to, uint256 nonce, bytes memory signature) public payable {
         require (saleState, "Presale not active");
     

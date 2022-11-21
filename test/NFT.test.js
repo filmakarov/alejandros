@@ -1000,112 +1000,55 @@ describe('Vinyl Token holders mint', async function () {
 
 /*  ====== ====== ====== ====== ====== ======
     *   
-    *   VIEW FUNCTIONS TESTS AFTER MERGING
+    *   PUBLIC MINT TESTS 
     * 
     * ====== ====== ====== ====== ======  ====== */
 
-/*
-describe('View functions tests after merging', async function () {
+describe('Public mint test', async function () {
 
   beforeEach(async () => {  
-    let randomAmount = (Math.floor(Math.random() * 10)) + 2;    
-    let txPrelMint = await nftContract.connect(deployer).adminMint(await random.getAddress(), randomAmount);
-    await txPrelMint.wait();
 
-    randomAmount = (Math.floor(Math.random() * 10)) + 3;    
-    txPrelMint = await nftContract.connect(deployer).adminMint(await random2.getAddress(), randomAmount);
-    await txPrelMint.wait();
-    
-    randomAmount = (Math.floor(Math.random() * 10)) + 1;    
-    txPrelMint = await nftContract.connect(deployer).adminMint(await holder2.getAddress(), randomAmount);
-    await txPrelMint.wait();
+    const mintQty = 15;
+      const { nonce: nonce, signature: allowance } = await signAllowance(
+          await random.getAddress(),
+          mintQty,
+          Math.floor(Math.random() * 1000 * (await provider.getBlockNumber())), //some random allowance id
+          regularPrice
+      );
+      
+      await nftContract.connect(random).mint(await random.getAddress(), nonce, allowance, {value: regularPrice.mul(mintQty)});
 
-    randomAmount = (Math.floor(Math.random() * 10)) + 5;    
-    txPrelMint = await nftContract.connect(deployer).adminMint(await holder.getAddress(), randomAmount);
-    await txPrelMint.wait();
-
-    randomAmount = (Math.floor(Math.random() * 10)) + 1;    
-    txPrelMint = await nftContract.connect(deployer).adminMint(await holder3.getAddress(), randomAmount);
-    await txPrelMint.wait();
-    
-    //console.log("Total Supply before burn",(await nftContract.totalSupply()).toString());
   });
 
-  it('can return correct tokens of Owner after burning', async function () {
+  it('can public mint', async function () {
 
-    let tokensOfOwnerBefore = await nftContract.tokensOfOwner(await holder.getAddress());
+    await nftContract.connect(deployer).switchPublicSaleState();
+    let supplBefore = await nftContract.totalSupply();
 
-    // MERGE TOKENS //
+    expect(await nftContract.balanceOf(await random2.getAddress())).to.equal(0);
 
-    let tokenId1 = tokensOfOwnerBefore[0];
-    let tokenId2 = tokensOfOwnerBefore[tokensOfOwnerBefore.length - 2];
-    //console.log("Balance of holder: %i", await nftContract.balanceOf(await holder.getAddress())); 
-    //console.log("Token1 id %i | token2 id %i", tokenId1, tokenId2); 
+    let publMTx = await nftContract.connect(random2).publicMint({value: regularPrice});
+    await publMTx.wait();
 
-    await nftContract.connect(deployer).switchMergeState();
-
-    let txMerge = await nftContract.connect(holder).mergeTokens(tokenId1, tokenId2);
-    await txMerge.wait();
-
-    //console.log("Last minted token id is %i", await nftContract.nextTokenIndex() - 1);
-
-    // MERGE TOKENS END //
+    expect(await nftContract.totalSupply()).to.equal(supplBefore.add(1));
+    expect(await nftContract.balanceOf(await random2.getAddress())).to.equal(1);
     
-    let minted = (await nftContract.totalSupply());  //how many tokens was minted
-
-    let tokensOfOwnerExpected = [];
-    for (let i = 0; i< tokensOfOwnerBefore.length; i++) {
-      tokensOfOwnerExpected.push(tokensOfOwnerBefore[i]);
-    }
-
-    let indexOfMerged = tokensOfOwnerExpected.indexOf(tokenId1);
-    //console.log("index of merged 1", indexOfMerged);
-    if (indexOfMerged > -1) { // only splice array when item is found
-      tokensOfOwnerExpected.splice(indexOfMerged, 1); // 2nd parameter means remove one item only
-    }
-    // same for the second one
-    indexOfMerged = tokensOfOwnerExpected.indexOf(tokenId2);
-    if (indexOfMerged > -1) { 
-      tokensOfOwnerExpected.splice(indexOfMerged, 1); 
-    } 
-
-    //add the # of the newly minted token
-    tokensOfOwnerExpected.push((await nftContract.nextTokenIndex()).sub(1));
-
-    let tokensOfOwnerAfter = await nftContract.tokensOfOwner(await holder.getAddress());
-    
-    for (let i=0; i<tokensOfOwnerAfter.length; i++) {
-      //console.log("expected: %i; got from contract: %i" , tokensOfOwnerExpected[i], tokensOfOwnerAfter[i]);
-      expect(tokensOfOwnerAfter[i]).to.equal(tokensOfOwnerExpected[i]);
-    }
-
   }); 
 
-  it('ownerOf should revert for burned', async function () {
-
-    let tokensOfOwnerBefore = await nftContract.tokensOfOwner(await holder.getAddress());
-
-    // MERGE TOKENS //
-
-    let tokenId1 = tokensOfOwnerBefore[0];
-    let tokenId2 = tokensOfOwnerBefore[tokensOfOwnerBefore.length - 2];
+  it('can not public mint before public sale opens', async function () {
     
-    await nftContract.connect(deployer).switchMergeState();
+    expect(await nftContract.balanceOf(await random2.getAddress())).to.equal(0);
+    await expect (nftContract.connect(random2).publicMint({value: regularPrice})).to.be.revertedWith("Public Sale not active");
+  });
 
-    let txMerge = await nftContract.connect(holder).mergeTokens(tokenId1, tokenId2);
-    await txMerge.wait();
+  it('can not public mint with low eth', async function () {
+    await nftContract.connect(deployer).switchPublicSaleState();
 
-    // MERGE TOKENS END //
-
-    await expect(
-      nftContract.ownerOf(tokenId1)).to.be.revertedWith('Blank Token: Not minted or burned');
-    await expect(
-        nftContract.ownerOf(tokenId2)).to.be.revertedWith('Blank Token: Not minted or burned');
-
-  }); 
+    expect(await nftContract.balanceOf(await random2.getAddress())).to.equal(0);
+    await expect (nftContract.connect(random2).publicMint({value: 10000})).to.be.revertedWith("Not Enough Eth");
+  });
 
 });
-*/
 
 
 });
