@@ -24,6 +24,7 @@
     "hardhat-gas-reporter": "^1.0.9"
   },
   "dependencies": {
-    "@rari-capital/solmate": "^6.4.0"
+    "@rari-capital/solmate": "^6.4.0",
+    "console-progress-bar": "^1.0.5"
   }
 }
